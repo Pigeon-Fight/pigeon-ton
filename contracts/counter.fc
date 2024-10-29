@@ -1,0 +1,79 @@
+#include "imports/stdlib.fc";
+
+;;
+;;  Storage
+;;
+;;  uint32 id
+;;  uint32 id
+;;  MsgAddressInt latest_address
+;;
+
+;; CRC32 Hashing Tool : https://docs.ton.org/develop/data-formats/crc32
+const op::up = "op::up"c;
+const op::down = "op::down"c;
+const op::reset = "op::reset"c;
+
+() recv_internal(cell in_msg_full, slice in_msg_body) {
+    ;; load sender msg
+    if (in_msg_body.slice_empty?()) {
+        return ();
+    }
+    int op = in_msg_body~load_uint(32);
+
+    ;; load data from sender cell
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+    slice sender_address = cs~load_msg_addr();
+
+    ;; load data from current cell
+    slice ds = get_data().begin_parse();
+    int counter_id = ds~load_uint(32);
+
+    if (op == op::up) {
+        int counter_value = ds~load_uint(32);
+
+        set_data(
+            begin_cell()
+                .store_uint(counter_id, 32)
+                .store_uint(counter_value + 1, 32)
+                .store_slice(sender_address)
+                .end_cell()
+        );
+        return ();
+	}
+
+    if (op == op::down) {
+        int counter_value = ds~load_uint(32);
+        set_data(
+            begin_cell()
+                .store_uint(counter_id, 32)
+                .store_uint(counter_value - 1, 32)
+                .store_slice(sender_address)
+                .end_cell()
+        );
+    }
+
+    if (op == op::reset) {
+        set_data(
+            begin_cell()
+                .store_uint(counter_id, 32)
+                .store_uint(0, 32)
+                .store_slice(sender_address)
+                .end_cell()
+        );
+    }
+
+    throw(0xffff);
+}
+
+(int, int, slice) get_contract_storage_data() method_id {
+  slice ds = get_data().begin_parse();
+  return (
+    ds~load_uint(32), ;; counter_id
+    ds~load_uint(32), ;; counter_value
+    ds~load_msg_addr() ;; the most recent sender
+  );
+}
