@@ -73,4 +73,88 @@ describe('Counter', () => {
             expect(counterAfter.counterValue).toBe(counterBefore.counterValue + 1);
         }
     });
+
+    it('anyone can deposit', async () => {
+        const anyone = await blockchain.treasury('anyone');
+
+        const balanceBefore = await counter.getBalance();
+
+        console.log('balance before deposit', balanceBefore.balance);
+
+        const depositAmount = toNano('5');
+
+        const despoitResult = await counter.sendMsg(anyone.getSender(), {
+            value: depositAmount,
+            opcode: Opcodes.deposit,
+        });
+
+        expect(despoitResult.transactions).toHaveTransaction({
+            from: anyone.address,
+            to: counter.address,
+            success: true,
+        });
+
+        const balanceAfter = await counter.getBalance();
+
+        console.log('balance after withdraw', balanceAfter.balance);
+
+        expect(balanceAfter.balance).toBeGreaterThan((depositAmount * 95n) / 100n);
+    });
+
+    it('owner can withdraw', async () => {
+        const owner = await blockchain.treasury('deployer');
+
+        const balanceBefore = await counter.getBalance();
+
+        console.log('balance before withdraw', balanceBefore.balance);
+
+        const withdrawAmount = toNano('0.07');
+        const sendAmount = toNano('0.05');
+
+        const withdrawResult = await counter.sendWithdraw(owner.getSender(), {
+            value: sendAmount,
+            amount: withdrawAmount,
+        });
+
+        expect(withdrawResult.transactions).toHaveTransaction({
+            from: owner.address,
+            to: counter.address,
+            success: true,
+        });
+
+        const balanceAfter = await counter.getBalance();
+
+        console.log('balance after withdraw', balanceAfter.balance);
+
+        expect(balanceAfter.balance).toBeLessThan(balanceBefore.balance);
+    });
+
+    it('fail if non-owner withdraw', async () => {
+        const someone = await blockchain.treasury('someone');
+
+        const balanceBefore = await counter.getBalance();
+
+        console.log('balance before withdraw', balanceBefore.balance);
+
+        const withdrawAmount = toNano('0.07');
+        const sendAmount = toNano('0.05');
+
+        const withdrawResult = await counter.sendWithdraw(someone.getSender(), {
+            value: sendAmount,
+            amount: withdrawAmount,
+        });
+
+        expect(withdrawResult.transactions).toHaveTransaction({
+            from: someone.address,
+            to: counter.address,
+            success: false,
+            exitCode: 403, // unauthorized
+        });
+
+        const balanceAfter = await counter.getBalance();
+
+        console.log('balance after withdraw', balanceAfter.balance);
+
+        expect(balanceAfter.balance).toBe(balanceBefore.balance);
+    });
 });

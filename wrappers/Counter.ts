@@ -18,13 +18,20 @@ export type CounterConfig = {
 };
 
 export function counterConfigToCell(config: CounterConfig): Cell {
-    return beginCell().storeUint(config.id, 32).storeUint(0, 32).storeAddress(config.address).endCell();
+    return beginCell()
+        .storeUint(config.id, 32)
+        .storeUint(0, 32)
+        .storeAddress(config.address)
+        .storeAddress(config.address)
+        .endCell();
 }
 
 export const Opcodes = {
     up: calculateRequestOpcode('op::up'),
     down: calculateRequestOpcode('op::down'),
     reset: calculateRequestOpcode('op::reset'),
+    deposit: calculateRequestOpcode('op::deposit'),
+    withdraw: calculateRequestOpcode('op::withdraw'),
 };
 
 export class Counter implements Contract {
@@ -66,15 +73,40 @@ export class Counter implements Contract {
         });
     }
 
+    async sendWithdraw(
+        provider: ContractProvider,
+        via: Sender,
+        opts: {
+            value: bigint;
+            amount: bigint;
+        },
+    ) {
+        await provider.internal(via, {
+            value: opts.value,
+            sendMode: SendMode.PAY_GAS_SEPARATELY,
+            body: beginCell().storeUint(Opcodes.withdraw, 32).storeCoins(opts.amount).endCell(),
+        });
+    }
+
     async getData(provider: ContractProvider) {
         const result = await provider.get('get_contract_storage_data', []);
         const counterId = result.stack.readNumber();
         const counterValue = result.stack.readNumber();
         const lastAddress = result.stack.readAddress();
+        const ownerAddress = result.stack.readAddress();
         return {
             counterId,
             counterValue,
             lastAddress,
+            ownerAddress,
+        };
+    }
+
+    async getBalance(provider: ContractProvider) {
+        const result = await provider.get('balance', []);
+        const balance = result.stack.readNumber();
+        return {
+            balance,
         };
     }
 }
