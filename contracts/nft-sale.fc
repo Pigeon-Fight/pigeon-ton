@@ -1,0 +1,163 @@
+#include "imports/stdlib.fc";
+
+;;
+;;  Storage
+;;
+;; storage#_ price:Coins
+;;           nft_collection_address:MsgAddressInt
+;;           owner_address:MsgAddressInt
+;;           initial_nft_content:Cell
+;;         = SaleStorage
+;;
+
+;; OPCODEs
+;; CRC32 Hashing Tool : https://docs.ton.org/develop/data-formats/crc32
+const op::purchase = "op::purchase"c;
+const op::withdraw = "op::withdraw"c;
+const op::update_price = "op::update_price"c;
+const op::initial_nft_content = "op::initial_nft_content"c;
+
+;; CONSTANTs
+int min_tons_for_storage() asm "50000000 PUSHINT"; ;; 0.05 TON
+int tons_in_nft_item() asm "50000000 PUSHINT"; ;; 0.05 TON
+const const::initial_points = 10;
+
+;; ERRORs
+const error::unauthorized = 403;
+const error::not_enough_balance = 400;
+const error::invalid_points = 401;
+
+(int, slice, slice, cell) load_data() inline {
+    slice ds = get_data().begin_parse();
+    return (
+        ds~load_coins(),
+        ds~load_msg_addr(),
+        ds~load_msg_addr(),
+        ds~load_ref()
+    );
+}
+
+() save_data(int price, slice nft_collection_address, slice owner_address, cell initial_nft_content) impure inline {
+    set_data(
+            begin_cell()
+                .store_coins(price)
+                .store_slice(nft_collection_address)
+                .store_slice(owner_address)
+                .store_ref(initial_nft_content)
+                .end_cell()
+        );
+}
+
+() recv_internal(int msg_value, cell in_msg_full, slice in_msg_body) {
+    ;; load sender msg
+    if (in_msg_body.slice_empty?()) {
+        return ();
+    }
+    int op = in_msg_body~load_uint(32);
+
+    ;; load data from sender cell
+    slice cs = in_msg_full.begin_parse();
+    int flags = cs~load_uint(4);
+    if (flags & 1) { ;; ignore all bounced messages
+        return ();
+    }
+    slice sender_address = cs~load_msg_addr();
+
+    ;; load data from current cell
+    slice ds = get_data().begin_parse();
+    var (price, nft_collection_address, owner_address, initial_nft_content) = load_data();
+
+    ;; opcode - purchase
+    if (op == op::purchase) {
+        ;; check price
+        throw_unless(error::not_enough_balance, msg_value > price + tons_in_nft_item());
+        int send_value = msg_value - price;
+
+        ;; random nft content
+        int attack = in_msg_body~load_uint(8);
+        int defense = in_msg_body~load_uint(8);
+        int speed = in_msg_body~load_uint(8);
+        throw_unless(error::invalid_points, const::initial_points == attack + defense + speed);
+        
+        ;; sending internal message
+        ;; https://docs.ton.org/develop/smart-contracts/messages
+        cell msg = begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(nft_collection_address)
+            .store_coins(send_value)
+            .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+            ;; body
+            .store_uint(1, 32) ;; opcode: deploy nft
+            .store_uint(0, 64) ;; query_id
+            .store_coins(tons_in_nft_item()) ;; coins_amount
+            .store_ref(initial_nft_content) ;; nft_content
+            ;; end
+            .end_cell();
+
+        int msg_mode = 16; ;; 0 (Ordinal Message) + 16 (bounce the message on error)
+        
+        send_raw_message(msg, msg_mode);
+        return ();
+    }
+
+    ;; opcode - withdraw
+    if (op == op::withdraw) {
+        ;; check access right
+        throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
+
+        int withdraw_amount = in_msg_body~load_coins();
+        var [balance, _] = get_balance();
+        throw_unless(error::not_enough_balance, balance >= withdraw_amount);
+
+        ;; keep minimum ton for storage
+        int return_value = min(withdraw_amount, balance - min_tons_for_storage());
+
+        ;; sending internal message
+        ;; https://docs.ton.org/develop/smart-contracts/messages
+        cell msg = begin_cell()
+            .store_uint(0x18, 6)
+            .store_slice(sender_address)
+            .store_coins(return_value)
+            .store_uint(0, 1 + 4 + 4 + 64 + 32 + 1 + 1)
+            ;; .store_slice(message_body)
+            .end_cell();
+
+        int msg_mode = 1; ;; 0 (Ordinal Message) + 1 (Pay transfer seperately)
+        
+        send_raw_message(msg, msg_mode);
+        return ();
+    }
+
+    ;; opcode - update price
+    if (op == op::update_price) {
+        ;; check access right
+        throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
+
+        int new_price = in_msg_body~load_coins();
+        save_data(
+            new_price, nft_collection_address, owner_address, initial_nft_content
+        );
+    }
+
+    ;; opcode - initial content
+    if (op == op::initial_nft_content) {
+        ;; check access right
+        throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
+
+        cell new_initial_nft_content = in_msg_body~load_ref();
+        save_data(
+            price, nft_collection_address, owner_address, new_initial_nft_content
+        );
+    }
+
+    throw(0xffff);
+}
+
+(int, slice, slice, cell) get_contract_data() method_id {
+  return load_data();
+}
+
+int balance() method_id {
+    var [balance, _] = get_balance();
+    return balance;
+}

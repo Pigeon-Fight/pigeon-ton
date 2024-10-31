@@ -81,7 +81,7 @@ const error::not_enough_balance = 400;
 
     if (op == op::withdraw) {
         ;; check access right
-        throw_unless(error::unauthorized, equal_slice_bits(sender_address, owner_address));
+        throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
 
         int withdraw_amount = in_msg_body~load_coins();
         var [balance, _] = get_balance();
