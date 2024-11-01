@@ -5,6 +5,7 @@
 ;; storage#_ owner_address:MsgAddress 
 ;;           next_item_index:uint64
 ;;           collection_content:Cell
+;;           common_content:Cell
 ;;           nft_item_code:Cell
 ;;           royalty_params:RoyaltyParams
 ;;           = Storage;
@@ -179,8 +180,14 @@ slice get_nft_address_by_index(int index) method_id {
 }
 
 cell get_nft_content(int index, cell individual_nft_content) method_id {
+    var (_, _, content, _, _) = load_data();
+    slice cs = content.begin_parse();
+    cs~load_ref();
+    slice common_content = cs~load_ref().begin_parse();
+
     return (begin_cell()
-            .store_uint(0, 8) ;; 0 = onchain tag, 1 = offchain tag
+            .store_uint(1, 8) ;; 0 = onchain tag, 1 = offchain tag
+            .store_slice(common_content)
             .store_ref(individual_nft_content)
           .end_cell());
 }
