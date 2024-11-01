@@ -36,19 +36,6 @@ const error::invalid_points = 401;
     );
 }
 
-cell number_to_ascii_cell(int class) {
-  int tens = class / 10;
-  int units = class % 10;
-
-  var ds = begin_cell();
-  if (tens > 0) {
-    ds.store_uint(tens + 48, 8);
-  }
-  ds.store_uint(units + 48, 8).end_cell();
-
-  return ds.store_uint(units + 48, 8).end_cell();
-}
-
 () save_data(slice nft_collection_address, slice owner_address, cell price_dict) impure inline {
     set_data(
             begin_cell()
@@ -100,10 +87,6 @@ cell number_to_ascii_cell(int class) {
         
         ;; sending internal message
         ;; https://docs.ton.org/develop/smart-contracts/messages
-        cell nft_content = begin_cell()
-                    .store_slice(sender_address)
-                    .store_ref(number_to_ascii_cell(class))
-                    .end_cell();
         cell msg = begin_cell()
             .store_uint(0x18, 6)
             .store_slice(nft_collection_address)
@@ -113,7 +96,8 @@ cell number_to_ascii_cell(int class) {
             .store_uint(1, 32) ;; opcode: deploy nft
             .store_uint(0, 64) ;; query_id
             .store_coins(tons_in_nft_item()) ;; coins_amount
-            .store_ref(nft_content) ;; nft_content
+            .store_slice(sender_address) ;; owner address
+            .store_uint(class, 8) ;; nft class
             ;; end
             .end_cell();
 

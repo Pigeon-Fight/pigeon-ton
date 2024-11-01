@@ -8,8 +8,12 @@
 ;;  Storage
 ;;
 ;;  uint64 index
+;;  MsgAddressInt collection_address
+;;  MsgAddressInt owner_address
 ;;  uint8  class
 ;;;;  Stats
+;;  uint16 current_hp
+;;  uint16 current_energy
 ;;  uint16 exp
 ;;  uint16 allocated_point
 ;;  uint16 stat_atk
@@ -17,11 +21,8 @@
 ;;  uint16 stat_spd
 ;;  uint16 max_hp
 ;;  uint16 max_energy
-;;;; 112 bits
-
-;;  MsgAddressInt collection_address
-;;  MsgAddressInt owner_address
-;;
+;;;; 144 bits
+;;  Cell nft_item_code 
 
 #include "imports/stdlib.fc";
 #include "imports/op-codes.fc";
@@ -33,7 +34,8 @@ int workchain() asm "0 PUSHINT";
 ;; Opcodes
 const op::upgrade = "op::upgrade"c;
 const op::battle = "op::battle"c;
-const op::accept_battle = "op::accept_battle"c;
+const op::challenge = "op::challenge"c;
+const op::battle_end = "op::battle_end"c;
 
 ;; Constants
 const const::min_tons_for_storage = 10000000; ;; 0.01 TON
@@ -46,26 +48,33 @@ const error::unauthorized = 401;
 const error::not_enough_balance = 402;
 const error::deploy_failed = 405;
 const error::invalid_points = 406;
+const error::no_hp = 410;
+const error::invalid_opponent = 411;
 
-(int, int, slice, int, slice, slice) load_data() {
+(int, int, slice, slice, int, slice, cell) load_data() {
     slice ds = get_data().begin_parse();
-    var (class, stats) = (ds~load_uint(8), ds~load_bits(112));
-    var (index, collection_address) = (ds~load_uint(64), ds~load_msg_addr());
+    int index = ds~load_uint(64);
+    slice collection_address = ds~load_msg_addr();
     if (ds.slice_bits() > 0) {
-      return (-1, class, stats, index, collection_address, ds~load_msg_addr());
+      int class = ds~load_uint(8);
+      slice owner_address = ds~load_msg_addr();
+      slice stats = ds~load_bits(144);
+      cell nft_item_code = ds~load_ref();
+      return (-1, index, collection_address, owner_address, class, stats, ds~load_ref());
     } else {
-      return (0, class, stats, index, collection_address, null()); ;; nft not initialized yet
+      return (0, index, collection_address, null(), 0, null(), null()); ;; nft not initialized yet
     }
 }
 
-() store_data(int index, int class, slice stats, slice collection_address, slice owner_address) impure {
+() store_data(int index, int class, slice stats, slice collection_address, slice owner_address, cell nft_item_code) impure {
     set_data(
         begin_cell()
             .store_uint(index, 64)
-            .store_uint(class, 8)
-            .store_slice(stats)
             .store_slice(collection_address)
             .store_slice(owner_address)
+            .store_uint(class, 8)
+            .store_slice(stats)
+            .store_ref(nft_item_code)
             .end_cell()
     );
 }
@@ -97,7 +106,7 @@ int safe_add_16(int a, int b) inline {
   send_raw_message(msg.end_cell(), send_mode);
 }
 
-() transfer_ownership(int my_balance, int class, slice stats, int index, slice collection_address, slice owner_address, slice sender_address, int query_id, slice in_msg_body, int fwd_fees) impure inline {
+() transfer_ownership(int my_balance, int class, slice stats, int index, slice collection_address, slice owner_address, slice sender_address, int query_id, slice in_msg_body, int fwd_fees, cell nft_item_code) impure inline {
     throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
 
     slice new_owner_address = in_msg_body~load_msg_addr();
@@ -125,7 +134,191 @@ int safe_add_16(int a, int b) inline {
       send_msg(response_destination, rest_amount, op::excesses(), query_id, null(), 1); ;; paying fees, revert on errors
     }
 
-    store_data(index, class, stats, collection_address, new_owner_address);
+    store_data(index, class, stats, collection_address, new_owner_address, nft_item_code);
+}
+
+(int, int, int, int, int, int, int, int, int) get_stats(slice stats) inline {
+  int current_hp = stats~load_uint(16);
+  int current_energy = stats~load_uint(16);
+  int exp = stats~load_uint(16);
+  int allocated_point = stats~load_uint(16);
+  int atk = stats~load_uint(16);
+  int def = stats~load_uint(16);
+  int spd = stats~load_uint(16);
+  int max_hp = stats~load_uint(16);
+  int max_energy = stats~load_uint(16);
+  return (current_hp, current_energy, exp, allocated_point, atk, def, spd, max_hp, max_energy);
+}
+
+slice build_stats(
+  int current_hp,
+  int current_energy,
+  int exp,
+  int allocated_point,
+  int atk,
+  int def,
+  int spd,
+  int max_hp,
+  int max_energy
+) inline {
+  return begin_cell()
+              .store_uint(current_hp, 16) ;; current_hp
+              .store_uint(current_energy, 16) ;; current_energy
+              .store_uint(exp, 16) ;; exp
+              .store_uint(allocated_point, 16) ;; allocatated point
+              .store_uint(atk, 16) ;; atk
+              .store_uint(def, 16) ;; def
+              .store_uint(spd, 16) ;; spd
+              .store_uint(max_hp, 16) ;; max_hp
+              .store_uint(max_energy, 16) ;; max_energy
+            .end_cell().begin_parse();
+}
+
+(int, int, int, int) attack(
+  int attacker_current_energy,
+  int attacker_atk,
+  int attacker_def,
+  int defender_def,
+  int defender_hp
+) {
+  ;; energy run out => weak status
+  if (attacker_current_energy <= 0) {
+    attacker_atk = attacker_atk / 2;
+    attacker_def = attacker_def / 2;
+  }
+
+  ;; hp_lost min should be 1
+  int hp_lost = max(1, attacker_atk - defender_def);
+  defender_hp = defender_hp - hp_lost;
+
+  if (attacker_current_energy > 1) {
+    attacker_current_energy = attacker_current_energy - 1;
+  }
+
+  return (attacker_current_energy, attacker_atk, attacker_def, defender_hp);
+}
+
+(int, int, int, int, int) turn(
+  int action_threshold,
+  int a_action_points, int b_action_points, 
+  int a_atk, int b_atk,
+  int a_def, int b_def, 
+  int a_spd, int b_spd, 
+  int a_current_hp, int b_current_hp,
+  int a_current_energy, int b_current_energy
+) {
+  a_action_points = a_action_points + a_spd;
+  b_action_points = b_action_points + b_spd;
+
+  if (a_action_points >= action_threshold) {
+    if (a_current_hp > 0) {
+      (
+        a_current_energy,
+        a_atk,
+        a_def,
+        b_current_hp
+      ) = attack(
+        a_current_energy,
+        a_atk,
+        a_def,
+        b_def,
+        b_current_hp
+      );
+      a_action_points = a_action_points - action_threshold;
+    }
+  }
+
+  if (b_action_points >= action_threshold) {
+    if (b_current_hp > 0) {
+      (
+        b_current_energy,
+        b_atk,
+        b_def,
+        a_current_hp
+      ) = attack(
+        b_current_energy,
+        b_atk,
+        b_def,
+        a_def,
+        a_current_hp
+      );
+      b_action_points = b_action_points - action_threshold;
+    }
+  }
+
+  if (a_current_hp <= 0) {
+    ;; lose
+    return (0, 0, a_current_energy, b_current_hp, b_current_energy);
+  }
+  if (b_current_hp <= 0) {
+    ;; win
+    return (-1, a_current_hp, a_current_energy, 0, b_current_energy);
+  }
+
+  return turn(
+    action_threshold,
+    a_action_points, b_action_points, 
+    a_atk, b_atk, 
+    a_def, b_def, 
+    a_spd, b_spd, 
+    a_current_hp, b_current_hp,
+    a_current_energy, b_current_energy
+  );
+}
+
+;; result = 0 (I Win); = 1 (Opponent Win)
+;; my_new_stats, op_new_stats
+(int, slice, slice) battle(
+  slice my_stats, slice op_stats
+) {
+  var (
+    a_current_hp, a_current_energy, a_exp, 
+    a_allocated_point, a_atk, a_def, a_spd, 
+    a_max_hp, a_max_energy
+  ) = get_stats(my_stats);
+  var (
+    b_current_hp, b_current_energy, b_exp, 
+    b_allocated_point, b_atk, b_def, b_spd, 
+    b_max_hp, b_max_energy
+  ) = get_stats(op_stats);
+
+  int action_threshold = max(a_spd, b_spd);
+  
+  ;; first turn
+  (
+    int result, 
+    a_current_hp, a_current_energy, 
+    b_current_hp, b_current_energy
+  ) = turn(
+    action_threshold,
+    0, 0, 
+    a_atk, b_atk, 
+    a_def, b_def, 
+    a_spd, b_spd, 
+    a_current_hp, b_current_hp,
+    a_current_energy, b_current_energy
+  );
+
+  ;; TODO: gain xp if win
+  if (result) {
+    a_exp = a_exp + 1;
+  } else {
+    b_exp = a_exp + 1;
+  }
+
+  slice my_new_stats = build_stats(
+    a_current_hp, a_current_energy, a_exp, 
+    a_allocated_point, a_atk, a_def, a_spd, 
+    a_max_hp, a_max_energy
+  );
+
+  slice op_new_stats = build_stats(
+    b_current_hp, b_current_energy, b_exp, 
+    b_allocated_point, b_atk, b_def, b_spd, 
+    b_max_hp, b_max_energy
+  );
+
+  return (result, my_new_stats, op_new_stats);
 }
 
 () recv_internal(int my_balance, int msg_value, cell in_msg_full, slice in_msg_body) impure {
@@ -147,17 +340,23 @@ int safe_add_16(int a, int b) inline {
     cs~load_coins(); ;; skip ihr_fee
     int fwd_fee = muldiv(cs~load_coins(), 3, 2); ;; we use message fwd_fee for estimation of forward_payload costs
 
-    (int init?, int class, slice stats, int index, slice collection_address, slice owner_address) = load_data();
+    (
+      int init?, 
+      int index, 
+      slice collection_address, 
+      slice owner_address, 
+      int class, 
+      slice stats, 
+      cell nft_item_code
+    ) = load_data();
+
     if (~ init?) {
       throw_unless(error::deploy_failed, equal_slices(collection_address, sender_address));
-      var new_owner_address = in_msg_body~load_msg_addr();
-      store_data(index, class, stats, collection_address, new_owner_address);
-      if (in_msg_body.slice_data_empty?() == false) {
-        var forward_amount = in_msg_body~load_coins();
-        if (forward_amount) {
-          send_msg(new_owner_address, forward_amount, op::ownership_assigned(), 0, begin_cell().store_slice(collection_address).store_slice(in_msg_body), 3); ;; paying fees, ignore errors
-        }
-      }
+      owner_address = in_msg_body~load_msg_addr();
+      class = in_msg_body~load_uint(8);
+      nft_item_code = in_msg_body~load_ref();
+      stats = build_stats(10, 10, 0, 0, 1, 1, 1, 10, 10);
+      store_data(index, class, stats, collection_address, owner_address, nft_item_code);
       return ();
     }
 
@@ -165,7 +364,7 @@ int safe_add_16(int a, int b) inline {
     int query_id = in_msg_body~load_uint(64);
 
     if (op == op::transfer()) {
-      transfer_ownership(my_balance, class, stats, index, collection_address, owner_address, sender_address, query_id, in_msg_body, fwd_fee);
+      transfer_ownership(my_balance, class, stats, index, collection_address, owner_address, sender_address, query_id, in_msg_body, fwd_fee, nft_item_code);
       return ();
     }
     if (op == op::get_static_data()) {
@@ -173,10 +372,14 @@ int safe_add_16(int a, int b) inline {
       return ();
     }
     if (op == op::upgrade) {
+      var (
+        current_hp, current_energy, exp, 
+        allocated_point, atk, def, spd, 
+        max_hp, max_energy
+      ) = get_stats(stats);
+
       ;; update allocated_point
-      int exp = stats~load_uint(16);
       int total_point = exp_to_point(exp);
-      int allocated_point = stats~load_uint(16);
 
       int atk_point = in_msg_body~load_uint(16);
       int def_point = in_msg_body~load_uint(16);
@@ -188,13 +391,15 @@ int safe_add_16(int a, int b) inline {
       throw_unless(error::invalid_points, total_new_point <= total_point - allocated_point);
       allocated_point = allocated_point + total_new_point;
 
-      int atk = safe_add_16(stats~load_uint(16), atk_point);
-      int def = safe_add_16(stats~load_uint(16), def_point);
-      int spd = safe_add_16(stats~load_uint(16), spd_point);
-      int max_hp = safe_add_16(stats~load_uint(16), max_hp_point);
-      int max_energy = safe_add_16(stats~load_uint(16), max_energy_point);
+      atk = safe_add_16(atk, atk_point);
+      def = safe_add_16(def, def_point);
+      spd = safe_add_16(spd, spd_point);
+      max_hp = safe_add_16(max_hp, max_hp_point);
+      max_energy = safe_add_16(max_energy, max_energy_point);
 
       slice new_stats = begin_cell()
+            .store_uint(current_hp, 16)
+            .store_uint(current_energy, 16)
             .store_uint(exp, 16)
             .store_uint(allocated_point, 16)
             .store_uint(atk, 16)
@@ -220,7 +425,68 @@ int safe_add_16(int a, int b) inline {
         }
       }
 
-      store_data(index, class, new_stats, collection_address, owner_address);
+      store_data(index, class, new_stats, collection_address, owner_address, nft_item_code);
+    }
+
+    if (op == op::battle) {
+      throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
+
+      slice opponent_address = in_msg_body~load_msg_addr();
+      throw_if(error::invalid_opponent, equal_slices(sender_address, opponent_address));
+
+      int current_hp = stats~load_uint(16);
+      throw_unless(error::no_hp, current_hp > 0);
+
+      send_msg(
+        opponent_address, ;; destination
+        0, ;; amount
+        op::challenge, ;; opcode
+        0, ;; query id
+        begin_cell().store_uint(index, 64).store_slice(stats), ;; 0: challenge, 1: challenge accept
+        64 ;; mode: carry all the remaining value of the inbound message
+      );  
+    }
+
+    if (op == op::challenge) {
+      ;; Check if the message send from other nft
+      int nft_opponent_index = in_msg_body~load_uint(8);
+
+      cell state_init = calculate_nft_item_state_init(nft_opponent_index, nft_item_code);
+      slice nft_sender_address = calculate_nft_item_address(workchain(), state_init);
+      throw_unless(error::unauthorized, equal_slices(sender_address, nft_sender_address));
+
+      slice nft_opponent_stats = in_msg_body~load_bits(144);
+      ;; Battle
+      (
+        int result, 
+        slice my_stats, slice op_stats
+      ) = battle(stats, nft_opponent_stats);
+      
+      ;; Update my stats
+      store_data(index, class, my_stats, collection_address, owner_address, nft_item_code);
+
+      ;; return battle result
+      send_msg(
+        sender_address, ;; destination
+        0, ;; amount
+        op::battle_end, ;; opcode
+        0, ;; query id
+        begin_cell().store_uint(index, 8).store_slice(op_stats),
+        64 ;; mode: carry all the remaining value of the inbound message
+      );
+    }
+
+    if (op == op::battle_end) {
+      ;; Check if the message send from other nft
+      int nft_opponent_index = in_msg_body~load_uint(8);
+
+      cell state_init = calculate_nft_item_state_init(nft_opponent_index, nft_item_code);
+      slice nft_sender_address = calculate_nft_item_address(workchain(), state_init);
+      throw_unless(error::unauthorized, equal_slices(sender_address, nft_sender_address));
+
+      slice my_new_stats = in_msg_body~load_bits(144);
+      ;; Update my stats
+      store_data(index, class, my_new_stats, collection_address, owner_address, nft_item_code);
     }
 
     throw(0xffff);
@@ -244,6 +510,40 @@ cell number_to_ascii_cell(int class) {
 ;;
 
 (int, int, slice, slice, cell) get_nft_data() method_id {
-  (int init?, int class, slice stats, int index, slice collection_address, slice owner_address) = load_data();
+  (
+      int init?, 
+      int index, 
+      slice collection_address, 
+      slice owner_address, 
+      int class,
+      _, 
+      _
+    ) = load_data();
   return (init?, index, collection_address, owner_address, number_to_ascii_cell(class));
+}
+
+(int, int, int, int, int, int, int, int, int) get_nft_stats() method_id {
+  (
+    _, 
+    _, 
+    _, 
+    _, 
+    _, 
+    slice stats, 
+    _
+  ) = load_data();
+  return get_stats(stats);
+}
+
+int get_nft_class() method_id {
+  (
+    _, 
+    _, 
+    _, 
+    _, 
+    int class, 
+    _, 
+    _
+  ) = load_data();
+  return class;
 }
