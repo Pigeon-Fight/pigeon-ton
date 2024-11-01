@@ -183,16 +183,19 @@ slice build_stats(
 ) {
   ;; energy run out => weak status
   if (attacker_current_energy <= 0) {
-    attacker_atk = attacker_atk / 2;
-    attacker_def = attacker_def / 2;
+    attacker_atk /= 2;
+    attacker_def /= 2;
   }
 
   ;; hp_lost min should be 1
   int hp_lost = max(1, attacker_atk - defender_def);
-  defender_hp = defender_hp - hp_lost;
+  defender_hp -= hp_lost;
+  if (defender_hp < 0) {
+    defender_hp = 0;
+  }
 
   if (attacker_current_energy > 1) {
-    attacker_current_energy = attacker_current_energy - 1;
+    attacker_current_energy -= 1;
   }
 
   return (attacker_current_energy, attacker_atk, attacker_def, defender_hp);
@@ -207,8 +210,8 @@ slice build_stats(
   int a_current_hp, int b_current_hp,
   int a_current_energy, int b_current_energy
 ) {
-  a_action_points = a_action_points + a_spd;
-  b_action_points = b_action_points + b_spd;
+  a_action_points += a_spd;
+  b_action_points += b_spd;
 
   if (a_action_points >= action_threshold) {
     if (a_current_hp > 0) {
@@ -224,7 +227,7 @@ slice build_stats(
         b_def,
         b_current_hp
       );
-      a_action_points = a_action_points - action_threshold;
+      a_action_points -= action_threshold;
     }
   }
 
@@ -242,7 +245,7 @@ slice build_stats(
         a_def,
         a_current_hp
       );
-      b_action_points = b_action_points - action_threshold;
+      b_action_points -= action_threshold;
     }
   }
 
@@ -299,11 +302,17 @@ slice build_stats(
     a_current_energy, b_current_energy
   );
 
-  ;; TODO: gain xp if win
+  ;; gain xp if win
+  int gain_xp = 10 * (1 + (b_exp - a_exp) / 540);
+
   if (result) {
-    a_exp = a_exp + 1;
+    if (gain_xp > 0) {
+      a_exp += gain_xp;
+    }
   } else {
-    b_exp = a_exp + 1;
+    if (gain_xp < 0) {
+      b_exp -= gain_xp;
+    }
   }
 
   slice my_new_stats = build_stats(
@@ -395,32 +404,34 @@ slice build_stats(
       def = safe_add_16(def, def_point);
       spd = safe_add_16(spd, spd_point);
       max_hp = safe_add_16(max_hp, max_hp_point);
+      current_hp = safe_add_16(current_hp, max_hp_point);
       max_energy = safe_add_16(max_energy, max_energy_point);
+      current_energy = safe_add_16(current_energy, max_energy_point);
 
-      slice new_stats = begin_cell()
-            .store_uint(current_hp, 16)
-            .store_uint(current_energy, 16)
-            .store_uint(exp, 16)
-            .store_uint(allocated_point, 16)
-            .store_uint(atk, 16)
-            .store_uint(def, 16)
-            .store_uint(spd, 16)
-            .store_uint(max_hp, 16)
-            .store_uint(max_energy, 16)
-            .end_cell().begin_parse();
+      slice new_stats = build_stats(
+        current_hp,
+        current_energy,
+        exp,
+        allocated_point,
+        atk,
+        def,
+        spd,
+        max_hp,
+        max_energy
+      );
 
       ;; evolution
       if (class <= 36) {
         ;; second evolution
         if (class <= 18) {
           if (allocated_point >= 310) {
-            class = class * 2;
+            class *= 2;
           }
         }
         ;; first evolution
         if (class <= 10) {
           if (allocated_point >= 160) {
-            class = class * 2;
+            class *= 2;
           }
         }
       }
@@ -487,6 +498,40 @@ slice build_stats(
       slice my_new_stats = in_msg_body~load_bits(144);
       ;; Update my stats
       store_data(index, class, my_new_stats, collection_address, owner_address, nft_item_code);
+    }
+
+    if (op == op::heal) {
+      ;; Check if the message send from the collection smc
+      throw_unless(error::unauthorized, equal_slices(sender_address, collection_address));
+
+      var (
+        current_hp, current_energy, exp, 
+        allocated_point, atk, def, spd, 
+        max_hp, max_energy
+      ) = get_stats(stats);
+
+      int heal_hp = in_msg_body~load_uint(16);
+      int heal_energy = in_msg_body~load_uint(16);
+
+      current_hp += (max_hp * heal_hp / 100);
+      current_energy += (max_energy * heal_energy / 100);
+
+      current_hp = min(current_hp, max_hp);
+      current_energy = min(current_energy, max_energy);
+
+      slice new_stats = build_stats(
+        current_hp,
+        current_energy,
+        exp,
+        allocated_point,
+        atk,
+        def,
+        spd,
+        max_hp,
+        max_energy
+      );
+
+      store_data(index, class, new_stats, collection_address, owner_address, nft_item_code);
     }
 
     throw(0xffff);
