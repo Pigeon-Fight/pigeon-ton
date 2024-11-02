@@ -43,6 +43,11 @@ function makeSnakeCell(data: Buffer): Cell {
     return curCell.endCell();
 }
 
+export function encodeContent(content: string) {
+    let data = Buffer.from(content);
+    return makeSnakeCell(data);
+}
+
 export function encodeOffChainContent(content: string) {
     let data = Buffer.from(content);
     // https://github.com/ton-blockchain/TEPs/blob/master/text/0064-token-data-standard.md#informal-tl-b-scheme

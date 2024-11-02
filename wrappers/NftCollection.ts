@@ -10,16 +10,16 @@ import {
     SendMode,
     toNano,
 } from '@ton/core';
-import { calculateRequestOpcode, encodeOffChainContent } from './helper';
+import { calculateRequestOpcode, encodeContent, encodeOffChainContent, flattenSnakeCell } from './helper';
 import { PriceDictValue, PriceDictValueSerializer } from './dict';
 import { nftPrices } from './config';
 
 export type NftCollectionConfig = {
     ownerAddress: Address;
-    saleAddress: Address;
     royaltyPercent: number;
     royaltyAddress: Address;
     collectionContentUrl: string;
+    commonContentUrl: string;
     nftItemCode: Cell;
 };
 
@@ -48,7 +48,11 @@ export function nftCollectionConfigToCell(config: NftCollectionConfig): Cell {
         .storeAddress(config.ownerAddress) // ownerAddress
         .storeUint(1, 64) // nextItemIndex
         .storeDict(priceDict, Dictionary.Keys.Uint(8), PriceDictValueSerializer)
-        .storeRef(beginCell().storeRef(encodeOffChainContent(config.collectionContentUrl))) // contentCell
+        .storeRef(
+            beginCell()
+                .storeRef(encodeOffChainContent(config.collectionContentUrl))
+                .storeRef(encodeContent(config.commonContentUrl)),
+        ) // contentCell
         .storeRef(config.nftItemCode) // nftItemCodeCell
         .storeRef(royaltyCell); // royaltyCell
 
@@ -72,8 +76,8 @@ export class NftCollection implements Contract {
         return new NftCollection(address);
     }
 
-    async createFromConfig(config: NftCollectionConfig, code: Cell, workchain = 0) {
-        const data = await nftCollectionConfigToCell(config);
+    static createFromConfig(config: NftCollectionConfig, code: Cell, workchain = 0) {
+        const data = nftCollectionConfigToCell(config);
         const init = { code, data };
         return new NftCollection(contractAddress(workchain, init), init);
     }
@@ -86,7 +90,7 @@ export class NftCollection implements Contract {
         });
     }
 
-    async sendPurchase(
+    async sendPurchaseNft(
         provider: ContractProvider,
         via: Sender,
         opts: {
@@ -101,6 +105,27 @@ export class NftCollection implements Contract {
                 .storeUint(Opcodes.purchase, 32) // opcode
                 .storeUint(0, 64) // query
                 .storeUint(opts.nftClass, 8) // class
+                .endCell(),
+        });
+    }
+
+    async sendPurchaseItem(
+        provider: ContractProvider,
+        via: Sender,
+        opts: {
+            value: bigint;
+            itemId: number;
+            nftIndex: bigint;
+        },
+    ) {
+        await provider.internal(via, {
+            value: opts.value,
+            sendMode: SendMode.PAY_GAS_SEPARATELY,
+            body: beginCell()
+                .storeUint(Opcodes.purchase, 32) // opcode
+                .storeUint(0, 64) // query
+                .storeUint(opts.itemId, 8) // class
+                .storeUint(opts.nftIndex, 64) // nftItemIndex
                 .endCell(),
         });
     }
@@ -162,5 +187,53 @@ export class NftCollection implements Contract {
                 .storeCoins(opts.amount) // withdraw amount
                 .endCell(),
         });
+    }
+
+    async getCollectionData(provider: ContractProvider) {
+        const result = await provider.get('get_collection_data', []);
+        // NextItem Index
+        const nextItemIndex = result.stack.readNumber();
+        // Collection Content
+        const collectionContentCell = result.stack.readCell();
+        const contentBuffer = flattenSnakeCell(collectionContentCell);
+        const collectionContent = contentBuffer.slice(1).toString('utf8');
+        // Owner Address
+        const ownerAddress = result.stack.readAddress();
+        return {
+            nextItemIndex,
+            collectionContent,
+            ownerAddress,
+        };
+    }
+
+    async getBalance(provider: ContractProvider) {
+        const result = await provider.get('balance', []);
+        const balance = result.stack.readNumber();
+        return balance;
+    }
+
+    async getNftAddressByIndex(provider: ContractProvider, index: bigint) {
+        const result = await provider.get('get_nft_address_by_index', [
+            {
+                type: 'int',
+                value: index,
+            },
+        ]);
+        return result.stack.readAddress();
+    }
+
+    async getNftContent(provider: ContractProvider, index: bigint, nftContent: Cell) {
+        const result = await provider.get('get_nft_content', [
+            {
+                type: 'int',
+                value: index,
+            },
+            {
+                type: 'cell',
+                cell: nftContent,
+            },
+        ]);
+        const contentBuffer = flattenSnakeCell(result.stack.readCell());
+        return contentBuffer.slice(1).toString('utf8');
     }
 }

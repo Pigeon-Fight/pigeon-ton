@@ -1,6 +1,11 @@
 import { Address, beginCell, Cell, Contract, ContractProvider, Sender, SendMode } from '@ton/core';
 import { calculateRequestOpcode } from './helper';
 
+const BASE_EXP = 10;
+export function expToPoint(exp: number) {
+    return Math.floor((3 * (exp - BASE_EXP)) / 50);
+}
+
 const Opcodes = {
     transfer: 0x5fcc3d14,
     upgrade: calculateRequestOpcode('op::upgrade'),
@@ -83,5 +88,51 @@ export class NftItem implements Contract {
                 // Coin: forward_amount
                 .endCell(),
         });
+    }
+
+    async getNftData(provider: ContractProvider) {
+        const result = await provider.get('get_nft_data', []);
+        // Is Deployed
+        const isDeployed = result.stack.readNumber();
+        // Item Index
+        const itemIndex = result.stack.readNumber();
+        // Collection Address
+        const collectionAddr = result.stack.readAddress();
+        // Owner Address
+        const ownerAddress = result.stack.readAddress();
+        // NFT Content
+        const nftContentCell = result.stack.readCell();
+        return {
+            isDeployed,
+            itemIndex,
+            collectionAddr,
+            ownerAddress,
+            nftContentCell,
+        };
+    }
+
+    async getNftStats(provider: ContractProvider) {
+        const result = await provider.get('get_nft_stats', []);
+
+        const hp = result.stack.readNumber();
+        const energy = result.stack.readNumber();
+        const exp = result.stack.readNumber();
+        const allocated = result.stack.readNumber();
+        const atk = result.stack.readNumber();
+        const def = result.stack.readNumber();
+        const spd = result.stack.readNumber();
+        const maxHp = result.stack.readNumber();
+        const maxEnergy = result.stack.readNumber();
+        return {
+            hp,
+            energy,
+            exp,
+            allocated,
+            atk,
+            def,
+            spd,
+            maxHp,
+            maxEnergy,
+        };
     }
 }

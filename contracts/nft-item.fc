@@ -56,11 +56,11 @@ const error::invalid_opponent = 411;
     int index = ds~load_uint(64);
     slice collection_address = ds~load_msg_addr();
     if (ds.slice_bits() > 0) {
-      int class = ds~load_uint(8);
       slice owner_address = ds~load_msg_addr();
+      int class = ds~load_uint(8);
       slice stats = ds~load_bits(144);
       cell nft_item_code = ds~load_ref();
-      return (-1, index, collection_address, owner_address, class, stats, ds~load_ref());
+      return (-1, index, collection_address, owner_address, class, stats, nft_item_code);
     } else {
       return (0, index, collection_address, null(), 0, null(), null()); ;; nft not initialized yet
     }
@@ -303,16 +303,12 @@ slice build_stats(
   );
 
   ;; gain xp if win
-  int gain_xp = 10 * (1 + (b_exp - a_exp) / 540);
+  int gain_xp = (10 * (540 + abs(b_exp - a_exp))) / 540;
 
   if (result) {
-    if (gain_xp > 0) {
-      a_exp += gain_xp;
-    }
+    a_exp += gain_xp;
   } else {
-    if (gain_xp < 0) {
-      b_exp -= gain_xp;
-    }
+    b_exp += gain_xp;
   }
 
   slice my_new_stats = build_stats(
@@ -364,7 +360,7 @@ slice build_stats(
       owner_address = in_msg_body~load_msg_addr();
       class = in_msg_body~load_uint(8);
       nft_item_code = in_msg_body~load_ref();
-      stats = build_stats(10, 10, 0, 0, 1, 1, 1, 10, 10);
+      stats = build_stats(10, 10, 100, 0, 1, 1, 1, 10, 10);
       store_data(index, class, stats, collection_address, owner_address, nft_item_code);
       return ();
     }
@@ -437,15 +433,17 @@ slice build_stats(
       }
 
       store_data(index, class, new_stats, collection_address, owner_address, nft_item_code);
+
+      return ();
     }
 
     if (op == op::battle) {
       throw_unless(error::unauthorized, equal_slices(sender_address, owner_address));
 
       slice opponent_address = in_msg_body~load_msg_addr();
-      throw_if(error::invalid_opponent, equal_slices(sender_address, opponent_address));
+      throw_if(error::invalid_opponent, equal_slices(my_address(), opponent_address));
 
-      int current_hp = stats~load_uint(16);
+      int current_hp = stats.preload_uint(16);
       throw_unless(error::no_hp, current_hp > 0);
 
       send_msg(
@@ -456,15 +454,20 @@ slice build_stats(
         begin_cell().store_uint(index, 64).store_slice(stats), ;; 0: challenge, 1: challenge accept
         64 ;; mode: carry all the remaining value of the inbound message
       );  
+
+      return ();
     }
 
     if (op == op::challenge) {
+      int current_hp = stats.preload_uint(16);
+      throw_unless(error::no_hp, current_hp > 0);
+      
       ;; Check if the message send from other nft
-      int nft_opponent_index = in_msg_body~load_uint(8);
+      int nft_opponent_index = in_msg_body~load_uint(64);
 
-      cell state_init = calculate_nft_item_state_init(nft_opponent_index, nft_item_code);
-      slice nft_sender_address = calculate_nft_item_address(workchain(), state_init);
-      throw_unless(error::unauthorized, equal_slices(sender_address, nft_sender_address));
+      cell state_init = calculate_nft_item_state_init(nft_opponent_index, collection_address, nft_item_code);
+      slice nft_opponent_address = calculate_nft_item_address(workchain(), state_init);
+      throw_unless(error::unauthorized, equal_slices(sender_address, nft_opponent_address));
 
       slice nft_opponent_stats = in_msg_body~load_bits(144);
       ;; Battle
@@ -482,22 +485,26 @@ slice build_stats(
         0, ;; amount
         op::battle_end, ;; opcode
         0, ;; query id
-        begin_cell().store_uint(index, 8).store_slice(op_stats),
+        begin_cell().store_uint(index, 64).store_slice(op_stats),
         64 ;; mode: carry all the remaining value of the inbound message
       );
+
+      return ();
     }
 
     if (op == op::battle_end) {
       ;; Check if the message send from other nft
-      int nft_opponent_index = in_msg_body~load_uint(8);
+      int nft_opponent_index = in_msg_body~load_uint(64);
 
-      cell state_init = calculate_nft_item_state_init(nft_opponent_index, nft_item_code);
+      cell state_init = calculate_nft_item_state_init(nft_opponent_index, collection_address, nft_item_code);
       slice nft_sender_address = calculate_nft_item_address(workchain(), state_init);
       throw_unless(error::unauthorized, equal_slices(sender_address, nft_sender_address));
 
       slice my_new_stats = in_msg_body~load_bits(144);
       ;; Update my stats
       store_data(index, class, my_new_stats, collection_address, owner_address, nft_item_code);
+
+      return ();
     }
 
     if (op == op::heal) {
@@ -532,6 +539,8 @@ slice build_stats(
       );
 
       store_data(index, class, new_stats, collection_address, owner_address, nft_item_code);
+
+      return ();
     }
 
     throw(0xffff);

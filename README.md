@@ -1,4 +1,4 @@
-# pigeon-ton
+# pigeon-smc
 
 ## Project structure
 

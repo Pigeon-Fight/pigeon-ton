@@ -54,10 +54,10 @@ const op::update_item = "op::update_item"c;
 }
 
 () deploy_nft_item(int item_index, cell nft_item_code, int amount, slice owner, int class) impure {
-  cell state_init = calculate_nft_item_state_init(item_index, nft_item_code);
+  cell state_init = calculate_nft_item_state_init(item_index, my_address(), nft_item_code);
   slice nft_address = calculate_nft_item_address(workchain(), state_init);
   
-  cell nft_content = begin_cell()
+  cell body = begin_cell()
                 .store_slice(owner)
                 .store_uint(class, 8)
                 .store_ref(nft_item_code)
@@ -71,12 +71,12 @@ const op::update_item = "op::update_item"c;
             ;; 4 + 2 => init-field flag (Option)
             ;; 1 => inplace message body flag
             .store_ref(state_init)
-            .store_ref(nft_content); ;; owner_address + nft_item_code
+            .store_ref(body); ;; owner_address + class + nft_item_code
   send_raw_message(msg.end_cell(), 0); ;; revert on errors
 }
 
 () heal_nft(int item_index, cell nft_item_code, slice heal_value) impure {
-  cell state_init = calculate_nft_item_state_init(item_index, nft_item_code);
+  cell state_init = calculate_nft_item_state_init(item_index, my_address(), nft_item_code);
   slice nft_address = calculate_nft_item_address(workchain(), state_init);
 
   var msg = begin_cell()
@@ -133,13 +133,13 @@ const op::update_item = "op::update_item"c;
 
         ;; Convert slice to price int128
         int price = item_slice~load_coins();
-
-        ;; check price
-        throw_unless(error::not_enough_balance, msg_value > price + tons_in_nft_item());
-        int coin_amount = msg_value - price;
         
         ;; purchase nft: class <= 44; 
         if (class <= 44) {
+            ;; check price
+            throw_unless(error::not_enough_balance, msg_value > price + tons_in_nft_item());
+            int coin_amount = msg_value - price;
+
             deploy_nft_item(next_item_index, nft_item_code, coin_amount, sender_address, class);
             next_item_index += 1;
             save_data(owner_address, next_item_index, item_dict, content, nft_item_code, royalty_params);
@@ -148,6 +148,10 @@ const op::update_item = "op::update_item"c;
 
         ;; purchase healling: item > 44
         if (class > 44) {
+            ;; check price
+            throw_unless(error::not_enough_balance, msg_value > price);
+            int coin_amount = msg_value - price;
+
             int item_index = in_msg_body~load_uint(64);
             heal_nft(item_index, nft_item_code, item_slice);
             return ();
@@ -208,7 +212,7 @@ const op::update_item = "op::update_item"c;
 
 slice get_nft_address_by_index(int index) method_id {
     var (_, _, _, _, nft_item_code, _) = load_data();
-    cell state_init = calculate_nft_item_state_init(index, nft_item_code);
+    cell state_init = calculate_nft_item_state_init(index, my_address(), nft_item_code);
     return calculate_nft_item_address(0, state_init);
 }
 
@@ -238,4 +242,9 @@ cell get_nft_content(int index, cell individual_nft_content) method_id {
     return (item_slice~load_coins(), item_slice~load_uint(16), item_slice~load_uint(16));
   }
   return (0, 0, 0);
+}
+
+int balance() method_id {
+    var [balance, _] = get_balance();
+    return balance;
 }
