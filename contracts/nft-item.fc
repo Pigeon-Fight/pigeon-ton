@@ -359,8 +359,12 @@ slice build_stats(
       throw_unless(error::deploy_failed, equal_slices(collection_address, sender_address));
       owner_address = in_msg_body~load_msg_addr();
       class = in_msg_body~load_uint(8);
+      int atk = 1 + in_msg_body~load_uint(16);
+      int def = 1 + in_msg_body~load_uint(16);
+      int spd = 1 + in_msg_body~load_uint(16);
       nft_item_code = in_msg_body~load_ref();
-      stats = build_stats(10, 10, 100, 0, 1, 1, 1, 10, 10);
+
+      stats = build_stats(10, 10, 100, 0, atk, def, spd, 10, 10);
       store_data(index, class, stats, collection_address, owner_address, nft_item_code);
       return ();
     }

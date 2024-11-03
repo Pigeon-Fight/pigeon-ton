@@ -12,7 +12,7 @@ import {
 } from '@ton/core';
 import { calculateRequestOpcode, encodeContent, encodeOffChainContent, flattenSnakeCell } from './helper';
 import { PriceDictValue, PriceDictValueSerializer } from './dict';
-import { nftPrices } from './config';
+import { classPrices, itemPrices } from './config';
 
 export type NftCollectionConfig = {
     ownerAddress: Address;
@@ -34,11 +34,21 @@ export function nftCollectionConfigToCell(config: NftCollectionConfig): Cell {
 
     // Price Dict
     const priceDict = Dictionary.empty<number, PriceDictValue>();
-    for (const [itemId, { tonPrice, healHp, healEnergy }] of Object.entries(nftPrices)) {
+    for (const [itemId, { tonPrice, boostAtk, boostDef, boostSpd }] of Object.entries(classPrices)) {
         priceDict.set(parseInt(itemId), {
             price: toNano(tonPrice),
-            healHp,
-            healEnergy,
+            attr1: boostAtk,
+            attr2: boostDef,
+            attr3: boostSpd,
+        });
+    }
+
+    for (const [itemId, { tonPrice, healHp, healEnergy }] of Object.entries(itemPrices)) {
+        priceDict.set(parseInt(itemId), {
+            price: toNano(tonPrice),
+            attr1: healHp,
+            attr2: healEnergy,
+            attr3: 0,
         });
     }
 

@@ -4,8 +4,7 @@ import '@ton/test-utils';
 import { compile } from '@ton/blueprint';
 import { expToPoint, NftItem } from '../wrappers/NftItem';
 import { NftCollection } from '../wrappers/NftCollection';
-import { nftPrices } from '../wrappers/config';
-import { calculateRequestOpcode } from '../wrappers/helper';
+import { classPrices, itemPrices } from '../wrappers/config';
 
 describe('Nft', () => {
     let nftItemCode: Cell, nftCollectionCode: Cell;
@@ -20,8 +19,8 @@ describe('Nft', () => {
     let nftCollection: SandboxContract<NftCollection>;
 
     // CONSTANTS
-    const COLLECTION_CONTENT_URL = 'https://collection.url';
-    const ITEM_BASE_URL = 'https://base.url/';
+    const COLLECTION_CONTENT_URL = 'https://assets.pigeon-fight.xyz/collection.json';
+    const ITEM_BASE_URL = 'https://assets.pigeon-fight.xyz/metadata/';
 
     beforeEach(async () => {
         blockchain = await Blockchain.create();
@@ -142,7 +141,7 @@ describe('Nft', () => {
 
         const purchaseNft = async (userSeed: string, nftClass: number) => {
             const user = await blockchain.treasury(userSeed);
-            const price = nftPrices[nftClass].tonPrice;
+            const price = classPrices[nftClass].tonPrice;
 
             const data = await nftCollection.getCollectionData();
             const nextItemIndex = data.nextItemIndex;
@@ -199,7 +198,7 @@ describe('Nft', () => {
         it('anyone can purchase healing item for any nft', async () => {
             const itemId = 45;
             const anyone = await blockchain.treasury('anyone');
-            const price = nftPrices[itemId].tonPrice;
+            const price = itemPrices[itemId].tonPrice;
 
             const nftData = await nftUser1.getNftData();
 
@@ -224,8 +223,12 @@ describe('Nft', () => {
         });
 
         describe('Battle', () => {
+            let stats1BeforeUpgrade: any;
+
             beforeEach(async () => {
-                const { exp, allocated } = await nftUser1.getNftStats();
+                const stats = await nftUser1.getNftStats();
+                stats1BeforeUpgrade = stats;
+                const { exp, allocated } = stats;
                 expect(exp).toEqual(100); // Default Exp = 100
                 expect(allocated).toEqual(0); // Default No Allocated for new NFT
                 const unallocatedPoint = expToPoint(exp) - allocated;
@@ -249,11 +252,11 @@ describe('Nft', () => {
 
             it('should upgrade nft', async () => {
                 const statsAfter = await nftUser1.getNftStats();
-                expect(statsAfter.atk).toEqual(3);
-                expect(statsAfter.def).toEqual(2);
-                expect(statsAfter.spd).toEqual(1);
-                expect(statsAfter.maxHp).toEqual(11);
-                expect(statsAfter.maxEnergy).toEqual(11);
+                expect(statsAfter.atk).toEqual(stats1BeforeUpgrade.atk + 2);
+                expect(statsAfter.def).toEqual(stats1BeforeUpgrade.def + 1);
+                expect(statsAfter.spd).toEqual(stats1BeforeUpgrade.spd + 0);
+                expect(statsAfter.maxHp).toEqual(stats1BeforeUpgrade.maxHp + 1);
+                expect(statsAfter.maxEnergy).toEqual(stats1BeforeUpgrade.maxEnergy + 1);
             });
 
             it('upgrade failed due to not enough point', async () => {
@@ -448,7 +451,7 @@ describe('Nft', () => {
                 // Anyone can heal this nft by calling through collection
                 const anyone = await blockchain.treasury('anyone');
                 const itemId = 45; // full hp - energy
-                const price = nftPrices[itemId].tonPrice;
+                const price = itemPrices[itemId].tonPrice;
 
                 // Raise error if No TON deposit
                 const result = await nftCollection.sendPurchaseItem(anyone.getSender(), {
