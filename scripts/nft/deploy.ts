@@ -20,6 +20,8 @@ export async function run(provider: NetworkProvider) {
         ),
     );
 
+    // fee: 0.027359173 TON + 0.0002996 TON
+    // tx: https://testnet.tonscan.org/tx/NZsLMkU2RqapZaUMDbgcw7KsNZ%2FBbmnzXpm0MN1DUx8=
     await nftCollection.sendDeploy(provider.sender(), toNano('0.05'));
     await provider.waitForDeploy(nftCollection.address);
     console.table(await nftCollection.getCollectionData());

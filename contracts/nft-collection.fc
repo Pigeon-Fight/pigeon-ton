@@ -53,7 +53,7 @@ const op::update_item = "op::update_item"c;
     .end_cell());
 }
 
-() deploy_nft_item(int item_index, cell nft_item_code, int amount, slice owner, int class, slice item_slice) impure {
+() deploy_nft_item(int item_index, cell nft_item_code, slice owner, int class, slice item_slice) impure {
   cell state_init = calculate_nft_item_state_init(item_index, my_address(), nft_item_code);
   slice nft_address = calculate_nft_item_address(workchain(), state_init);
   
@@ -67,7 +67,7 @@ const op::update_item = "op::update_item"c;
   var msg = begin_cell()
             .store_uint(0x18, 6)
             .store_slice(nft_address)
-            .store_coins(amount)
+            .store_coins(min_tons_for_storage())
             .store_uint(4 + 2 + 1, 1 + 4 + 4 + 64 + 32 + 1 + 1 + 1)
             ;; 4 + 2 => init-field flag (Option)
             ;; 1 => inplace message body flag
@@ -139,9 +139,8 @@ const op::update_item = "op::update_item"c;
         if (class <= 44) {
             ;; check price
             throw_unless(error::not_enough_balance, msg_value > price + tons_in_nft_item());
-            int coin_amount = msg_value - price;
 
-            deploy_nft_item(next_item_index, nft_item_code, coin_amount, sender_address, class, item_slice);
+            deploy_nft_item(next_item_index, nft_item_code, sender_address, class, item_slice);
             next_item_index += 1;
             save_data(owner_address, next_item_index, item_dict, content, nft_item_code, royalty_params);
             return ();
