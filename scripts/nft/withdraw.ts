@@ -2,7 +2,7 @@ import { Address, toNano } from '@ton/core';
 import { NetworkProvider } from '@ton/blueprint';
 import { NftCollection } from '../../wrappers/NftCollection';
 
-const NFT_COLLECTION_ADDR = 'EQATjJt5Sd3J_7JGz4NIfkdonw2q6Y2PFknQSFwtvYjghUhN'; // testnet
+const NFT_COLLECTION_ADDR = 'EQBuz5raFksipFH3ltcn0B2DNFq_-mTyTuRi-AAqd0YZeEbU'; // testnet
 
 export async function run(provider: NetworkProvider) {
     const nftCollection = provider.open(
@@ -19,8 +19,8 @@ export async function run(provider: NetworkProvider) {
     // fee: ~
     // tx:
     await nftCollection.sendWithdraw(provider.sender(), {
-        value: toNano('0.001'),
-        amount: toNano('1'),
+        value: toNano('0.002'),
+        amount: toNano('2.032'),
     });
     await provider.waitForDeploy(nftAddress);
 }

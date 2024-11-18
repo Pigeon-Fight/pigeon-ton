@@ -114,16 +114,21 @@ export class NftItem implements Contract {
     async getNftStats(provider: ContractProvider) {
         const result = await provider.get('get_nft_stats', []);
 
-        const hp = result.stack.readNumber();
-        const energy = result.stack.readNumber();
-        const exp = result.stack.readNumber();
-        const allocated = result.stack.readNumber();
-        const atk = result.stack.readNumber();
-        const def = result.stack.readNumber();
-        const spd = result.stack.readNumber();
-        const maxHp = result.stack.readNumber();
-        const maxEnergy = result.stack.readNumber();
+        const index = result.stack.readNumber(); // index
+        const classId = result.stack.readNumber(); // class
+        const stats = result.stack.readCell().asSlice();
+        const hp = stats.loadUint(16);
+        const energy = stats.loadUint(16);
+        const exp = stats.loadUint(16);
+        const allocated = stats.loadUint(16);
+        const atk = stats.loadUint(16);
+        const def = stats.loadUint(16);
+        const spd = stats.loadUint(16);
+        const maxHp = stats.loadUint(16);
+        const maxEnergy = stats.loadUint(16);
         return {
+            index,
+            classId,
             hp,
             energy,
             exp,

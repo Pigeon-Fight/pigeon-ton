@@ -3,7 +3,7 @@ import { NetworkProvider } from '@ton/blueprint';
 import { NftCollection } from '../../wrappers/NftCollection';
 import { classPrices } from '../../wrappers/config';
 
-const NFT_COLLECTION_ADDR = 'EQATjJt5Sd3J_7JGz4NIfkdonw2q6Y2PFknQSFwtvYjghUhN'; // testnet
+const NFT_COLLECTION_ADDR = 'EQBuz5raFksipFH3ltcn0B2DNFq_-mTyTuRi-AAqd0YZeEbU'; // testnet
 
 export async function run(provider: NetworkProvider) {
     const nftCollection = provider.open(NftCollection.createFromAddress(Address.parse(NFT_COLLECTION_ADDR)));

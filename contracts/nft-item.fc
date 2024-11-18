@@ -580,28 +580,15 @@ cell number_to_ascii_cell(int class) {
   return (init?, index, collection_address, owner_address, number_to_ascii_cell(class));
 }
 
-(int, int, int, int, int, int, int, int, int) get_nft_stats() method_id {
+(int, int, cell) get_nft_stats() method_id {
   (
     _, 
+    int index, 
     _, 
     _, 
-    _, 
-    _, 
+    int class,
     slice stats, 
     _
   ) = load_data();
-  return get_stats(stats);
-}
-
-int get_nft_class() method_id {
-  (
-    _, 
-    _, 
-    _, 
-    _, 
-    int class, 
-    _, 
-    _
-  ) = load_data();
-  return class;
+  return (index, class, begin_cell().store_slice(stats).end_cell());
 }
